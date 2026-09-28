@@ -229,7 +229,7 @@ PENDING
 
 ### Database
 
-* PostgreSQL / MySQL
+* Localstorage
 
 ### Development Tools
 
