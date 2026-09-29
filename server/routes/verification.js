@@ -3,18 +3,24 @@ const router = express.Router();
 const { QuestionnaireRepository, PartyRepository, VerificationItemRepository, GateReopenSignalRepository } = require('../repositories/repository');
 const AuditService = require('../services/auditService');
 
-// Get verification queue (submitted questionnaires)
+// Get verification queue (submitted questionnaires + re-verification)
 router.get('/queue', (req, res) => {
   try {
-    const questionnaires = QuestionnaireRepository.findAll()
-      .filter(q => q.status === 'QC_REVIEW');
+    // Get parties that need verification (QC_REVIEW or REVERIFICATION status)
+    const partiesNeedingVerification = PartyRepository.findAll()
+      .filter(p => p.status === 'QC_REVIEW' || p.status === 'REVERIFICATION');
 
-    const queue = questionnaires.map(q => {
-      const party = PartyRepository.findById(q.partyId);
+    const queue = partiesNeedingVerification.map(party => {
+      const questionnaires = QuestionnaireRepository.findByPartyId(party.id);
+      const latestQuestionnaire = questionnaires[questionnaires.length - 1];
+      
       return {
-        ...q,
-        partyName: party ? party.legalName : 'Unknown',
-        partyId: q.partyId
+        partyId: party.id,
+        partyName: party.legalName,
+        status: party.status,
+        questionnaireId: latestQuestionnaire?.id,
+        submittedAt: latestQuestionnaire?.submittedAt,
+        verificationType: party.status === 'REVERIFICATION' ? 'RE-VERIFICATION' : 'INITIAL VERIFICATION'
       };
     });
 
@@ -24,7 +30,7 @@ router.get('/queue', (req, res) => {
   }
 });
 
-// Approve questionnaire
+// Approve questionnaire (handles both initial and re-verification)
 router.post('/:id/approve', (req, res) => {
   try {
     const questionnaire = QuestionnaireRepository.findById(req.params.id);
@@ -32,7 +38,15 @@ router.post('/:id/approve', (req, res) => {
       return res.status(404).json({ success: false, error: { code: 'QUESTIONNAIRE_NOT_FOUND', message: 'Questionnaire not found' } });
     }
 
-    if (questionnaire.status !== 'QC_REVIEW') {
+    const party = PartyRepository.findById(questionnaire.partyId);
+    if (!party) {
+      return res.status(404).json({ success: false, error: { code: 'PARTY_NOT_FOUND', message: 'Party not found' } });
+    }
+
+    // Check if this is initial verification or re-verification
+    const isReverification = party.status === 'REVERIFICATION';
+
+    if (!isReverification && questionnaire.status !== 'QC_REVIEW') {
       return res.status(400).json({ success: false, error: { code: 'INVALID_STATUS', message: 'Questionnaire must be in QC_REVIEW status' } });
     }
 
@@ -42,41 +56,65 @@ router.post('/:id/approve', (req, res) => {
       approvedBy: req.body.approvedBy || 'qc_admin'
     });
 
-    // Update party status
+    // Update party status to ACTIVE
     PartyRepository.update(questionnaire.partyId, {
       status: 'ACTIVE'
     });
 
-    // Create verification items for all gates
-    const gates = [
-      { code: 'REGISTRATION', number: 1, name: 'Registration Certificate' },
-      { code: 'LICENSING', number: 2, name: 'Business Licence' },
-      { code: 'BANKING', number: 3, name: 'Bank Proof' },
-      { code: 'BUSINESS', number: 4, name: 'Business Verification' },
-      { code: 'LISTING', number: 5, name: 'Listing Verification' }
-    ];
-
-    gates.forEach(gate => {
-      VerificationItemRepository.create({
-        partyId: questionnaire.partyId,
-        gate: gate.code,
-        gateNumber: gate.number,
-        type: 'DOCUMENT',
-        name: gate.name,
-        status: 'VERIFIED',
-        verifiedAt: new Date().toISOString(),
-        verifiedBy: req.body.approvedBy || 'qc_admin'
+    if (isReverification) {
+      // For re-verification, update stale verification items back to VERIFIED
+      const verificationItems = VerificationItemRepository.findByPartyId(questionnaire.partyId);
+      verificationItems.forEach(item => {
+        if (item.status === 'STALE') {
+          VerificationItemRepository.update(item.id, {
+            status: 'VERIFIED',
+            verifiedAt: new Date().toISOString(),
+            verifiedBy: req.body.approvedBy || 'qc_admin',
+            staleAt: null
+          });
+        }
       });
-    });
 
-    AuditService.log({
-      entityType: 'QUESTIONNAIRE',
-      entityId: questionnaire.id,
-      action: 'KYC_APPROVED',
-      actorId: req.body.approvedBy || 'qc_admin',
-      oldValue: JSON.stringify(questionnaire),
-      newValue: JSON.stringify(updatedQuestionnaire)
-    });
+      AuditService.log({
+        entityType: 'QUESTIONNAIRE',
+        entityId: questionnaire.id,
+        action: 'REVERIFICATION_APPROVED',
+        actorId: req.body.approvedBy || 'qc_admin',
+        oldValue: JSON.stringify(questionnaire),
+        newValue: JSON.stringify(updatedQuestionnaire)
+      });
+    } else {
+      // Initial verification - create verification items for all gates
+      const gates = [
+        { code: 'REGISTRATION', number: 1, name: 'Registration Certificate' },
+        { code: 'LICENSING', number: 2, name: 'Business Licence' },
+        { code: 'BANKING', number: 3, name: 'Bank Proof' },
+        { code: 'BUSINESS', number: 4, name: 'Business Verification' },
+        { code: 'LISTING', number: 5, name: 'Listing Verification' }
+      ];
+
+      gates.forEach(gate => {
+        VerificationItemRepository.create({
+          partyId: questionnaire.partyId,
+          gate: gate.code,
+          gateNumber: gate.number,
+          type: 'DOCUMENT',
+          name: gate.name,
+          status: 'VERIFIED',
+          verifiedAt: new Date().toISOString(),
+          verifiedBy: req.body.approvedBy || 'qc_admin'
+        });
+      });
+
+      AuditService.log({
+        entityType: 'QUESTIONNAIRE',
+        entityId: questionnaire.id,
+        action: 'KYC_APPROVED',
+        actorId: req.body.approvedBy || 'qc_admin',
+        oldValue: JSON.stringify(questionnaire),
+        newValue: JSON.stringify(updatedQuestionnaire)
+      });
+    }
 
     res.json(updatedQuestionnaire);
   } catch (error) {

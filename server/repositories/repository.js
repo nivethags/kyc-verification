@@ -119,6 +119,10 @@ const AmendmentRepository = {
     return Storage.filter('amendments', a => a.partyId === partyId);
   },
 
+  findByEditRequestId(editRequestId) {
+    return Storage.filter('amendments', a => a.editRequestId === editRequestId);
+  },
+
   findByStatus(status) {
     return Storage.filter('amendments', a => a.status === status);
   },
@@ -140,6 +144,9 @@ const AmendmentRepository = {
     }
     if (filters.partyId) {
       amendments = amendments.filter(a => a.partyId === filters.partyId);
+    }
+    if (filters.editRequestId) {
+      amendments = amendments.filter(a => a.editRequestId === filters.editRequestId);
     }
     
     return amendments;

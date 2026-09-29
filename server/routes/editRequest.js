@@ -109,7 +109,7 @@ router.post('/:id/approve', (req, res) => {
       approvedAt: new Date().toISOString()
     });
 
-    // Apply the edit to questionnaire
+    // Apply the edit to questionnaire (this updates the actual data)
     const answer = QuestionnaireAnswerRepository.findByQuestionnaireId(editRequest.questionnaireId)
       .find(a => a.questionId === editRequest.questionId);
     
@@ -119,7 +119,7 @@ router.post('/:id/approve', (req, res) => {
       });
     }
 
-    // Automatically create an amendment
+    // Automatically create an amendment for QC review
     const questionnaire = QuestionnaireRepository.findById(editRequest.questionnaireId);
     
     // Determine target gate based on question
@@ -134,17 +134,22 @@ router.post('/:id/approve', (req, res) => {
 
     const targetGate = gateMapping[editRequest.questionId] || { gate: 'BUSINESS', number: 4 };
 
-    // Determine invalidated items
+    // Find actual verification items to invalidate
+    const verificationItems = VerificationItemRepository.findByPartyId(editRequest.partyId);
     const invalidatedItems = [];
+    
     if (targetGate.gate === 'REGISTRATION') {
-      invalidatedItems.push({
-        id: `verification_item_${Date.now()}_1`,
-        type: 'DOCUMENT',
-        name: 'Registration Certificate',
-        previousStatus: 'VERIFIED',
-        status: 'STALE',
-        invalidatedReason: 'Registration data changed',
-        invalidatedAt: new Date().toISOString()
+      const regItems = verificationItems.filter(v => v.gate === 'REGISTRATION');
+      regItems.forEach(item => {
+        invalidatedItems.push({
+          id: item.id,
+          type: item.type,
+          name: item.name,
+          previousStatus: item.status,
+          status: 'STALE',
+          invalidatedReason: 'Registration data changed',
+          invalidatedAt: new Date().toISOString()
+        });
       });
     }
 

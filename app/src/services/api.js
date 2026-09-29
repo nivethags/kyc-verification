@@ -10,6 +10,7 @@ const api = axios.create({
 });
 
 // Party APIs
+export const getParties = (params) => api.get('/parties', { params });
 export const createParty = (data) => api.post('/parties', data);
 export const getParty = (id) => api.get(`/parties/${id}`);
 export const getPartyQuestionnaire = (id) => api.get(`/parties/${id}/questionnaire`);

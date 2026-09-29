@@ -75,6 +75,9 @@ const VerificationQueue = () => {
                   Party
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Verification Type
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Submitted Date
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -87,10 +90,19 @@ const VerificationQueue = () => {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {queue.map((item) => (
-                <tr key={item.id}>
+                <tr key={item.partyId}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900">{item.partyName}</div>
-                    <div className="text-sm text-gray-500">{item.id}</div>
+                    <div className="text-sm text-gray-500">{item.partyId}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                      item.verificationType === 'RE-VERIFICATION' 
+                        ? 'bg-orange-100 text-orange-800' 
+                        : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {item.verificationType}
+                    </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm text-gray-900">
@@ -104,13 +116,13 @@ const VerificationQueue = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
                     <button
-                      onClick={() => handleApprove(item.id)}
+                      onClick={() => handleApprove(item.questionnaireId)}
                       className="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 transition"
                     >
                       Approve
                     </button>
                     <button
-                      onClick={() => setRejectingId(item.id)}
+                      onClick={() => setRejectingId(item.questionnaireId)}
                       className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 transition"
                     >
                       Reject

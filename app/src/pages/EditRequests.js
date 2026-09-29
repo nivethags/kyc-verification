@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { getParty, getPartyQuestionnaire, createEditRequest, getEditRequests } from '../services/api';
+import { getParties, getParty, getPartyQuestionnaire, createEditRequest, getEditRequests } from '../services/api';
 
 const EditRequests = () => {
+  const [parties, setParties] = useState([]);
   const [selectedParty, setSelectedParty] = useState(null);
   const [questionnaire, setQuestionnaire] = useState(null);
   const [editRequests, setEditRequests] = useState([]);
@@ -22,30 +23,19 @@ const EditRequests = () => {
 
   const loadActiveParties = async () => {
     try {
-      // Try to load the first active party from the existing data
-      // We'll try a few common party IDs that might exist
-      const possiblePartyIds = [
-        'party_1790605293152_n9k8epy23', // Your newest active party
-        'party_1790604455343_rhz0ekgmw',
-        'party_1790605019347_d432q9hky'
-      ];
-
-      for (const partyId of possiblePartyIds) {
-        try {
-          const partyRes = await getParty(partyId);
-          if (partyRes.data.status === 'ACTIVE') {
-            setSelectedParty(partyRes.data);
-            loadPartyQuestionnaire(partyId);
-            loadEditRequests(partyId);
-            return;
-          }
-        } catch (error) {
-          // Try next ID
-          continue;
-        }
+      // Dynamically load all ACTIVE parties from the database
+      const res = await getParties({ status: 'ACTIVE' });
+      const activeParties = res.data;
+      
+      setParties(activeParties);
+      
+      // Automatically select the first active party if available
+      if (activeParties.length > 0) {
+        const firstActiveParty = activeParties[0];
+        setSelectedParty(firstActiveParty);
+        loadPartyQuestionnaire(firstActiveParty.id);
+        loadEditRequests(firstActiveParty.id);
       }
-
-      console.log('No active party found');
     } catch (error) {
       console.error('Error loading parties:', error);
     }
@@ -77,6 +67,28 @@ const EditRequests = () => {
       requestedValue: '',
       reason: ''
     });
+  };
+
+  const handlePartySelect = async (partyId) => {
+    setSelectedParty(null);
+    setQuestionnaire(null);
+    setEditRequests([]);
+    setFormData({
+      questionId: '',
+      questionText: '',
+      currentValue: '',
+      requestedValue: '',
+      reason: ''
+    });
+
+    try {
+      const partyRes = await getParty(partyId);
+      setSelectedParty(partyRes.data);
+      loadPartyQuestionnaire(partyId);
+      loadEditRequests(partyId);
+    } catch (error) {
+      console.error('Error loading party:', error);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -128,6 +140,31 @@ const EditRequests = () => {
         {/* Edit Request Form */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-semibold mb-4">Create Edit Request</h2>
+          
+          {/* Party Selection */}
+          {parties.length > 0 && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Select Party
+              </label>
+              <select
+                value={selectedParty?.id || ''}
+                onChange={(e) => handlePartySelect(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                {parties.map((party) => (
+                  <option key={party.id} value={party.id}>
+                    {party.legalName}
+                  </option>
+                ))}
+              </select>
+              {selectedParty && (
+                <div className="mt-2 text-sm text-gray-600">
+                  Working with: <span className="font-medium">{selectedParty.legalName}</span>
+                </div>
+              )}
+            </div>
+          )}
           
           {!selectedParty ? (
             <div className="text-gray-600">No active party found. Please complete KYC first.</div>

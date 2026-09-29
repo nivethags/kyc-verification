@@ -6,7 +6,9 @@ const Dashboard = () => {
   const [stats, setStats] = useState({
     pendingAmendments: 0,
     pendingEditRequests: 0,
-    pendingVerification: 0
+    pendingVerification: 0,
+    reverificationCount: 0,
+    initialVerificationCount: 0
   });
   const [loading, setLoading] = useState(true);
 
@@ -22,10 +24,20 @@ const Dashboard = () => {
         getVerificationQueue()
       ]);
 
+      // Count re-verification parties separately
+      const reverificationCount = verificationRes.data.filter(
+        item => item.verificationType === 'RE-VERIFICATION'
+      ).length;
+      const initialVerificationCount = verificationRes.data.filter(
+        item => item.verificationType === 'INITIAL VERIFICATION'
+      ).length;
+
       setStats({
         pendingAmendments: amendmentsRes.data.length,
         pendingEditRequests: editRequestsRes.data.length,
-        pendingVerification: verificationRes.data.length
+        pendingVerification: verificationRes.data.length,
+        reverificationCount,
+        initialVerificationCount
       });
     } catch (error) {
       console.error('Error loading stats:', error);
@@ -46,7 +58,7 @@ const Dashboard = () => {
     <div className="max-w-7xl mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold text-gray-800 mb-8">Dashboard</h1>
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <Link to="/amendments" className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition">
           <div className="text-4xl font-bold text-blue-600 mb-2">{stats.pendingAmendments}</div>
           <div className="text-gray-600">Pending Amendments</div>
@@ -58,8 +70,13 @@ const Dashboard = () => {
         </Link>
         
         <Link to="/verification" className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition">
-          <div className="text-4xl font-bold text-purple-600 mb-2">{stats.pendingVerification}</div>
-          <div className="text-gray-600">Pending Verification</div>
+          <div className="text-4xl font-bold text-purple-600 mb-2">{stats.initialVerificationCount}</div>
+          <div className="text-gray-600">Initial Verification</div>
+        </Link>
+
+        <Link to="/verification" className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition">
+          <div className="text-4xl font-bold text-orange-600 mb-2">{stats.reverificationCount}</div>
+          <div className="text-gray-600">Re-verification</div>
         </Link>
       </div>
 

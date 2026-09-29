@@ -3,6 +3,22 @@ const router = express.Router();
 const { PartyRepository, QuestionnaireRepository, QuestionnaireAnswerRepository } = require('../repositories/repository');
 const AuditService = require('../services/auditService');
 
+// Get all parties
+router.get('/', (req, res) => {
+  try {
+    const { status } = req.query;
+    let parties = PartyRepository.findAll();
+    
+    if (status) {
+      parties = parties.filter(p => p.status === status);
+    }
+    
+    res.json(parties);
+  } catch (error) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: error.message } });
+  }
+});
+
 // Create a new party
 router.post('/', (req, res) => {
   try {

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { AmendmentRepository, PartyRepository, VerificationItemRepository, GateReopenSignalRepository } = require('../repositories/repository');
+const { AmendmentRepository, PartyRepository, VerificationItemRepository, GateReopenSignalRepository, EditRequestRepository, QuestionnaireRepository } = require('../repositories/repository');
 const AuditService = require('../services/auditService');
 
 // Get all amendments with filters
@@ -193,6 +193,91 @@ router.post('/:id/decision', (req, res) => {
       decidedAt: updatedAmendment.decidedAt,
       reopenSignal
     });
+  } catch (error) {
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: error.message } });
+  }
+});
+
+// Manual amendment creation (for data recovery)
+router.post('/manual-create', (req, res) => {
+  try {
+    const { editRequestId } = req.body;
+
+    const editRequest = EditRequestRepository.findById(editRequestId);
+    if (!editRequest) {
+      return res.status(404).json({ success: false, error: { code: 'EDIT_REQUEST_NOT_FOUND', message: 'Edit request not found' } });
+    }
+
+    if (editRequest.status !== 'APPROVED') {
+      return res.status(400).json({ success: false, error: { code: 'INVALID_STATUS', message: 'Edit request must be APPROVED' } });
+    }
+
+    // Check if amendment already exists
+    const existingAmendments = AmendmentRepository.findAll({ editRequestId });
+    if (existingAmendments.length > 0) {
+      return res.status(400).json({ success: false, error: { code: 'AMENDMENT_EXISTS', message: 'Amendment already exists for this edit request' } });
+    }
+
+    const questionnaire = QuestionnaireRepository.findById(editRequest.questionnaireId);
+    
+    // Determine target gate based on question
+    const gateMapping = {
+      'q_001': { gate: 'REGISTRATION', number: 1 },
+      'q_002': { gate: 'BUSINESS', number: 4 },
+      'q_003': { gate: 'BUSINESS', number: 4 },
+      'q_004': { gate: 'REGISTRATION', number: 1 },
+      'q_005': { gate: 'REGISTRATION', number: 1 },
+      'q_006': { gate: 'REGISTRATION', number: 1 }
+    };
+
+    const targetGate = gateMapping[editRequest.questionId] || { gate: 'BUSINESS', number: 4 };
+
+    // Find actual verification items to invalidate
+    const verificationItems = VerificationItemRepository.findByPartyId(editRequest.partyId);
+    const invalidatedItems = [];
+    
+    if (targetGate.gate === 'REGISTRATION') {
+      const regItems = verificationItems.filter(v => v.gate === 'REGISTRATION');
+      regItems.forEach(item => {
+        invalidatedItems.push({
+          id: item.id,
+          type: item.type,
+          name: item.name,
+          previousStatus: item.status,
+          status: 'STALE',
+          invalidatedReason: 'Registration data changed',
+          invalidatedAt: new Date().toISOString()
+        });
+      });
+    }
+
+    const amendment = AmendmentRepository.create({
+      partyId: editRequest.partyId,
+      questionnaireId: editRequest.questionnaireId,
+      editRequestId: editRequest.id,
+      questionnaireVersion: questionnaire ? questionnaire.version : 1,
+      questionId: editRequest.questionId,
+      questionText: editRequest.questionText,
+      beforeValue: editRequest.currentValue,
+      afterValue: editRequest.requestedValue,
+      reason: editRequest.reason,
+      targetGate: targetGate.gate,
+      targetGateNumber: targetGate.number,
+      listingImpact: targetGate.gate === 'REGISTRATION',
+      invalidatedItems,
+      status: 'PENDING'
+    });
+
+    AuditService.log({
+      entityType: 'AMENDMENT',
+      entityId: amendment.id,
+      action: 'AMENDMENT_MANUAL_CREATE',
+      actorId: req.body.createdBy || 'system',
+      oldValue: null,
+      newValue: JSON.stringify(amendment)
+    });
+
+    res.json(amendment);
   } catch (error) {
     res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: error.message } });
   }
