@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { EditRequestRepository, QuestionnaireAnswerRepository, QuestionnaireRepository, PartyRepository, AmendmentRepository } = require('../repositories/repository');
+const { EditRequestRepository, QuestionnaireAnswerRepository, QuestionnaireRepository, PartyRepository, AmendmentRepository, VerificationItemRepository } = require('../repositories/repository');
 const AuditService = require('../services/auditService');
 
 // Create an edit request
@@ -120,55 +120,78 @@ router.post('/:id/approve', (req, res) => {
     }
 
     // Automatically create an amendment for QC review
-    const questionnaire = QuestionnaireRepository.findById(editRequest.questionnaireId);
-    
-    // Determine target gate based on question
-    const gateMapping = {
-      'q_001': { gate: 'REGISTRATION', number: 1 },
-      'q_002': { gate: 'BUSINESS', number: 4 },
-      'q_003': { gate: 'BUSINESS', number: 4 },
-      'q_004': { gate: 'REGISTRATION', number: 1 },
-      'q_005': { gate: 'REGISTRATION', number: 1 },
-      'q_006': { gate: 'REGISTRATION', number: 1 }
-    };
+    let amendment = null;
+    try {
+      const questionnaire = QuestionnaireRepository.findById(editRequest.questionnaireId);
+      
+      // Determine target gate based on question
+      const gateMapping = {
+        'q_001': { gate: 'REGISTRATION', number: 1 },
+        'q_002': { gate: 'BUSINESS', number: 4 },
+        'q_003': { gate: 'BUSINESS', number: 4 },
+        'q_004': { gate: 'REGISTRATION', number: 1 },
+        'q_005': { gate: 'REGISTRATION', number: 1 },
+        'q_006': { gate: 'REGISTRATION', number: 1 }
+      };
 
-    const targetGate = gateMapping[editRequest.questionId] || { gate: 'BUSINESS', number: 4 };
+      const targetGate = gateMapping[editRequest.questionId] || { gate: 'BUSINESS', number: 4 };
 
-    // Find actual verification items to invalidate
-    const verificationItems = VerificationItemRepository.findByPartyId(editRequest.partyId);
-    const invalidatedItems = [];
-    
-    if (targetGate.gate === 'REGISTRATION') {
-      const regItems = verificationItems.filter(v => v.gate === 'REGISTRATION');
-      regItems.forEach(item => {
-        invalidatedItems.push({
-          id: item.id,
-          type: item.type,
-          name: item.name,
-          previousStatus: item.status,
-          status: 'STALE',
-          invalidatedReason: 'Registration data changed',
-          invalidatedAt: new Date().toISOString()
+      // Find actual verification items to invalidate
+      const verificationItems = VerificationItemRepository.findByPartyId(editRequest.partyId);
+      const invalidatedItems = [];
+      
+      if (targetGate.gate === 'REGISTRATION') {
+        const regItems = verificationItems.filter(v => v.gate === 'REGISTRATION');
+        regItems.forEach(item => {
+          invalidatedItems.push({
+            id: item.id,
+            type: item.type,
+            name: item.name,
+            previousStatus: item.status,
+            status: 'STALE',
+            invalidatedReason: 'Registration data changed',
+            invalidatedAt: new Date().toISOString()
+          });
         });
+      }
+
+      amendment = AmendmentRepository.create({
+        partyId: editRequest.partyId,
+        questionnaireId: editRequest.questionnaireId,
+        editRequestId: editRequest.id,
+        questionnaireVersion: questionnaire ? questionnaire.version : 1,
+        questionId: editRequest.questionId,
+        questionText: editRequest.questionText,
+        beforeValue: editRequest.currentValue,
+        afterValue: editRequest.requestedValue,
+        reason: editRequest.reason,
+        targetGate: targetGate.gate,
+        targetGateNumber: targetGate.number,
+        listingImpact: targetGate.gate === 'REGISTRATION',
+        invalidatedItems,
+        status: 'PENDING'
+      });
+
+      AuditService.log({
+        entityType: 'AMENDMENT',
+        entityId: amendment.id,
+        action: 'AMENDMENT_CREATED',
+        actorId: 'system',
+        oldValue: null,
+        newValue: JSON.stringify(amendment)
+      });
+    } catch (amendmentError) {
+      console.error('Error creating amendment:', amendmentError);
+      // Log the error but don't fail the entire approval
+      AuditService.log({
+        entityType: 'EDIT_REQUEST',
+        entityId: editRequest.id,
+        action: 'AMENDMENT_CREATION_FAILED',
+        actorId: 'system',
+        oldValue: null,
+        newValue: JSON.stringify({ error: amendmentError.message })
       });
     }
-
-    const amendment = AmendmentRepository.create({
-      partyId: editRequest.partyId,
-      questionnaireId: editRequest.questionnaireId,
-      editRequestId: editRequest.id,
-      questionnaireVersion: questionnaire ? questionnaire.version : 1,
-      questionId: editRequest.questionId,
-      questionText: editRequest.questionText,
-      beforeValue: editRequest.currentValue,
-      afterValue: editRequest.requestedValue,
-      reason: editRequest.reason,
-      targetGate: targetGate.gate,
-      targetGateNumber: targetGate.number,
-      listingImpact: targetGate.gate === 'REGISTRATION',
-      invalidatedItems,
-      status: 'PENDING'
-    });
 
     AuditService.log({
       entityType: 'EDIT_REQUEST',
@@ -179,20 +202,12 @@ router.post('/:id/approve', (req, res) => {
       newValue: JSON.stringify(updatedEditRequest)
     });
 
-    AuditService.log({
-      entityType: 'AMENDMENT',
-      entityId: amendment.id,
-      action: 'AMENDMENT_CREATED',
-      actorId: 'system',
-      oldValue: null,
-      newValue: JSON.stringify(amendment)
-    });
-
     res.json({
       editRequest: updatedEditRequest,
       amendment
     });
   } catch (error) {
+    console.error('Error approving edit request:', error);
     res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: error.message } });
   }
 });
